@@ -1,7 +1,7 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import { useInView } from 'react-intersection-observer';
-import { Globe, Palette, Microscope, TrendingUp, Heart, Camera } from 'lucide-react';
+import { Globe, Palette, TrendingUp } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 const CategorySection: React.FC = () => {
@@ -28,36 +28,12 @@ const CategorySection: React.FC = () => {
       count: 18
     },
     {
-      name: 'Science & Discovery',
-      slug: 'science',
-      description: 'Breakthroughs that shape our future',
-      icon: Microscope,
-      color: 'from-green-500 to-green-600',
-      count: 15
-    },
-    {
       name: 'Technology',
       slug: 'technology',
       description: 'Innovation changing our world',
       icon: TrendingUp,
       color: 'from-orange-500 to-orange-600',
       count: 21
-    },
-    {
-      name: 'Human Interest',
-      slug: 'human-interest',
-      description: 'Stories that touch the heart',
-      icon: Heart,
-      color: 'from-pink-500 to-pink-600',
-      count: 12
-    },
-    {
-      name: 'Photography',
-      slug: 'photography',
-      description: 'Visual storytelling at its finest',
-      icon: Camera,
-      color: 'from-indigo-500 to-indigo-600',
-      count: 9
     }
   ];
 
@@ -120,23 +96,42 @@ const CategorySection: React.FC = () => {
                     to={`/articles?category=${category.slug}`}
                     className="block h-full"
                   >
-                    <div className="bg-white rounded-xl p-6 shadow-lg hover:shadow-xl transition-all duration-300 h-full group">
-                      <div className="flex items-start justify-between mb-4">
-                        <div className={`w-12 h-12 rounded-full bg-gradient-to-r ${category.color} flex items-center justify-center group-hover:scale-110 transition-transform`}>
-                          <IconComponent className="text-white" size={24} />
+                    <div className="bg-white rounded-xl overflow-hidden shadow-lg hover:shadow-xl transition-all duration-300 h-full group">
+                      {/* Background Image/Pattern */}
+                      <div className={`h-32 bg-gradient-to-br ${category.color} relative overflow-hidden`}>
+                        <div className="absolute inset-0 opacity-20">
+                          {category.slug === 'world' && (
+                            <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(255,255,255,0.3)_1px,transparent_1px)] bg-[length:20px_20px]"></div>
+                          )}
+                          {category.slug === 'culture' && (
+                            <div className="absolute inset-0 bg-[conic-gradient(from_0deg,rgba(255,255,255,0.2),transparent,rgba(255,255,255,0.2))] bg-[length:40px_40px]"></div>
+                          )}
+                          {category.slug === 'technology' && (
+                            <div className="absolute inset-0 bg-[linear-gradient(45deg,rgba(255,255,255,0.1)_25%,transparent_25%,transparent_75%,rgba(255,255,255,0.1)_75%)] bg-[length:20px_20px]"></div>
+                          )}
                         </div>
-                        <span className="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded-full">
-                          {category.count} articles
-                        </span>
+                        <div className="absolute top-4 right-4">
+                          <span className="text-xs text-white bg-black bg-opacity-20 px-2 py-1 rounded-full backdrop-blur-sm">
+                            {category.count} articles
+                          </span>
+                        </div>
+                        <div className="absolute bottom-4 left-4">
+                          <div className="w-12 h-12 rounded-full bg-white bg-opacity-20 backdrop-blur-sm flex items-center justify-center group-hover:scale-110 transition-transform">
+                            <IconComponent className="text-white" size={24} />
+                          </div>
+                        </div>
                       </div>
                       
-                      <h3 className="text-xl font-semibold text-gray-900 mb-2 group-hover:text-gold-600 transition-colors">
-                        {category.name}
-                      </h3>
-                      
-                      <p className="text-gray-600 leading-relaxed">
-                        {category.description}
-                      </p>
+                      {/* Content */}
+                      <div className="p-6">
+                        <h3 className="text-xl font-semibold text-gray-900 mb-2 group-hover:text-gold-600 transition-colors">
+                          {category.name}
+                        </h3>
+                        
+                        <p className="text-gray-600 leading-relaxed">
+                          {category.description}
+                        </p>
+                      </div>
                     </div>
                   </Link>
                 </motion.div>
