@@ -3,46 +3,89 @@ import { useParams, Link } from 'react-router-dom';
 import { Helmet } from 'react-helmet-async';
 import { motion } from 'framer-motion';
 import { Calendar, User, Clock, Tag, ArrowLeft, Share2, Heart, Eye } from 'lucide-react';
-import { doc, getDoc, updateDoc, increment } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, increment, collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { Article } from '../types';
 import toast from 'react-hot-toast';
 
 const ArticleDetail: React.FC = () => {
-  const { id } = useParams();
+  const { id } = useParams(); // This could be either slug or document ID
   const [article, setArticle] = useState<Article | null>(null);
   const [loading, setLoading] = useState(true);
   const [liked, setLiked] = useState(false);
   const [imageLoaded, setImageLoaded] = useState(false);
 
   // Memoize the fetch function to prevent unnecessary re-renders
-  const fetchArticle = useCallback(async (articleId: string) => {
+  const fetchArticle = useCallback(async (identifier: string) => {
     try {
-      const docRef = doc(db, 'articles', articleId);
-      const docSnap = await getDoc(docRef);
-      
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        const articleData = {
-          id: docSnap.id,
-          ...data,
-          createdAt: data.createdAt?.toDate(),
-          updatedAt: data.updatedAt?.toDate(),
-        } as Article;
+      let articleData = null;
+      let docId = identifier;
+
+      // First, try to fetch by document ID directly
+      try {
+        const docRef = doc(db, 'articles', identifier);
+        const docSnap = await getDoc(docRef);
         
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          articleData = {
+            id: docSnap.id,
+            ...data,
+            createdAt: data.createdAt?.toDate(),
+            updatedAt: data.updatedAt?.toDate(),
+          } as Article;
+          docId = docSnap.id;
+        }
+      } catch (error) {
+        console.log('Direct ID fetch failed, trying slug lookup...');
+      }
+
+      // If direct ID fetch fails, try to find by slug
+      if (!articleData) {
+        try {
+          const articlesQuery = query(
+            collection(db, 'articles'),
+            where('slug', '==', identifier),
+            where('published', '==', true)
+          );
+          
+          const querySnapshot = await getDocs(articlesQuery);
+          
+          if (!querySnapshot.empty) {
+            const doc = querySnapshot.docs[0];
+            const data = doc.data();
+            articleData = {
+              id: doc.id,
+              ...data,
+              createdAt: data.createdAt?.toDate(),
+              updatedAt: data.updatedAt?.toDate(),
+            } as Article;
+            docId = doc.id;
+          }
+        } catch (error) {
+          console.error('Slug lookup failed:', error);
+        }
+      }
+
+      if (articleData) {
         setArticle(articleData);
         
-        // Increment view count asynchronously without blocking UI
-        updateDoc(docRef, {
-          views: increment(1)
-        }).catch(error => {
+        // Increment view count using the actual document ID
+        try {
+          const docRef = doc(db, 'articles', docId);
+          await updateDoc(docRef, {
+            views: increment(1)
+          });
+        } catch (error) {
           console.error('Error updating view count:', error);
-        });
+        }
       } else {
         console.error('Article not found');
+        setArticle(null);
       }
     } catch (error) {
       console.error('Error fetching article:', error);
+      setArticle(null);
     } finally {
       setLoading(false);
     }
@@ -50,6 +93,7 @@ const ArticleDetail: React.FC = () => {
 
   useEffect(() => {
     if (id) {
+      setLoading(true);
       fetchArticle(id);
     }
   }, [id, fetchArticle]);
@@ -110,7 +154,7 @@ const ArticleDetail: React.FC = () => {
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
           <div className="text-center">
             <h1 className="text-2xl font-bold text-gray-900 mb-4">Article Not Found</h1>
-            <p className="text-gray-600 mb-8">The article you're looking for doesn't exist.</p>
+            <p className="text-gray-600 mb-8">The article you're looking for doesn't exist or may have been removed.</p>
             <Link
               to="/articles"
               className="inline-flex items-center space-x-2 bg-gold-500 hover:bg-gold-600 text-white px-6 py-3 rounded-full font-semibold transition-all duration-300"
@@ -161,7 +205,7 @@ const ArticleDetail: React.FC = () => {
             {/* Category Badge */}
             <div className="mb-4">
               <span className="inline-block bg-gold-100 text-gold-800 px-3 py-1 rounded-full text-sm font-medium">
-                {article.category}
+                {article.category || 'Uncategorized'}
               </span>
             </div>
 
@@ -254,7 +298,7 @@ const ArticleDetail: React.FC = () => {
             className="bg-white rounded-xl p-8 shadow-sm border border-gray-100"
           >
             <div className="prose prose-lg max-w-none">
-              {article.content.split('\n').map((paragraph, index) => (
+              {article.content && article.content.split('\n').map((paragraph, index) => (
                 paragraph.trim() && (
                   <p key={index} className="mb-4 text-gray-700 leading-relaxed">
                     {paragraph}
