@@ -16,9 +16,9 @@ function App() {
       <div className="min-h-screen bg-gray-50">
         <Navbar />
         <motion.main
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.5 }}
+          initial={{ y: 0, opacity: 1 }}
+          animate={{ y: 0, opacity: 1 }}
+          style={{ willChange: 'auto' }}
         >
           <Routes>
             <Route path="/" element={<Home />} />
