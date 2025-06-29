@@ -1,4 +1,3 @@
-import React from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import Navbar from './components/layout/Navbar';
@@ -16,9 +15,9 @@ function App() {
       <div className="min-h-screen bg-gray-50">
         <Navbar />
         <motion.main
-          initial={{ y: 0, opacity: 1 }}
-          animate={{ y: 0, opacity: 1 }}
-          style={{ willChange: 'auto' }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.5 }}
         >
           <Routes>
             <Route path="/" element={<Home />} />
