@@ -8,6 +8,7 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   loading: boolean;
+  isAdmin: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -24,6 +25,9 @@ interface AuthProviderProps {
   children: ReactNode;
 }
 
+// Replace this with your actual Firebase Auth UID
+const ADMIN_UID = 'vUwGyeZJDpNOddLAhAVEDWj0shj2';
+
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -39,7 +43,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const login = async (email: string, password: string) => {
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      const result = await signInWithEmailAndPassword(auth, email, password);
+      
+      // Check if this is the admin user
+      if (result.user.uid !== ADMIN_UID) {
+        await signOut(auth);
+        throw new Error('Unauthorized access');
+      }
+      
       toast.success('Successfully logged in!');
     } catch (error: any) {
       toast.error(error.message || 'Failed to log in');
@@ -61,7 +72,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     user,
     login,
     logout,
-    loading
+    loading,
+    isAdmin: user?.uid === ADMIN_UID
   };
 
   return (
