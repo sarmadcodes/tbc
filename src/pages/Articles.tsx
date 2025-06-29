@@ -1,123 +1,303 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { Helmet } from 'react-helmet-async';
 import { motion } from 'framer-motion';
-import { Calendar, User, Clock, Tag, ArrowLeft, Share2, Heart, Eye } from 'lucide-react';
-import { doc, getDoc, updateDoc, increment } from 'firebase/firestore';
+import { 
+  Calendar, 
+  User, 
+  Clock, 
+  Tag, 
+  Search, 
+  Filter,
+  Eye,
+  ChevronRight
+} from 'lucide-react';
+import { collection, query, getDocs, orderBy, where } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { Article } from '../types';
-import toast from 'react-hot-toast';
 
-const ArticleDetail: React.FC = () => {
-  const { id } = useParams();
-  const [article, setArticle] = useState<Article | null>(null);
+const Articles: React.FC = () => {
+  const [articles, setArticles] = useState<Article[]>([]);
+  const [filteredArticles, setFilteredArticles] = useState<Article[]>([]);
   const [loading, setLoading] = useState(true);
-  const [liked, setLiked] = useState(false);
-  const [imageLoaded, setImageLoaded] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [categories, setCategories] = useState<string[]>([]);
 
-  // Memoize the fetch function to prevent unnecessary re-renders
-  const fetchArticle = useCallback(async (articleId: string) => {
-    try {
-      const docRef = doc(db, 'articles', articleId);
-      const docSnap = await getDoc(docRef);
-      
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        const articleData = {
-          id: docSnap.id,
-          ...data,
-          createdAt: data.createdAt?.toDate(),
-          updatedAt: data.updatedAt?.toDate(),
-        } as Article;
-        
-        setArticle(articleData);
-        
-        // Increment view count asynchronously without blocking UI
-        updateDoc(docRef, {
-          views: increment(1)
-        }).catch(error => {
-          console.error('Error updating view count:', error);
-        });
-      } else {
-        console.error('Article not found');
-      }
-    } catch (error) {
-      console.error('Error fetching article:', error);
-    } finally {
-      setLoading(false);
-    }
+  useEffect(() => {
+    fetchArticles();
   }, []);
 
   useEffect(() => {
-    if (id) {
-      fetchArticle(id);
-    }
-  }, [id, fetchArticle]);
+    filterArticles();
+  }, [articles, searchTerm, selectedCategory]);
 
-  const handleShare = useCallback(async () => {
-    if (navigator.share && article) {
+  const fetchArticles = async () => {
+    try {
+      setLoading(true);
+      
+      // First, try to get all published articles without ordering (in case createdAt field is missing)
+      let articlesQuery;
+      
       try {
-        await navigator.share({
-          title: article.title,
-          text: article.excerpt,
-          url: window.location.href,
-        });
+        // Try with ordering first
+        articlesQuery = query(
+          collection(db, 'articles'),
+          where('published', '==', true),
+          orderBy('createdAt', 'desc')
+        );
       } catch (error) {
-        console.error('Error sharing:', error);
+        console.log('Ordering failed, fetching without order:', error);
+        // If ordering fails, just get published articles
+        articlesQuery = query(
+          collection(db, 'articles'),
+          where('published', '==', true)
+        );
       }
-    } else {
-      // Fallback: copy to clipboard
-      navigator.clipboard.writeText(window.location.href);
-      toast.success('Link copied to clipboard!');
+      
+      const snapshot = await getDocs(articlesQuery);
+      
+      console.log('Firestore snapshot size:', snapshot.size); // Debug log
+      
+      const articlesData = snapshot.docs.map(doc => {
+        const data = doc.data();
+        console.log('Raw document data:', doc.id, data); // Debug log
+        
+        return {
+          id: doc.id,
+          ...data,
+          // Handle Firestore Timestamp conversion
+          createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(data.createdAt || Date.now()),
+          updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate() : new Date(data.updatedAt || Date.now()),
+          // Handle empty or missing category - use 'Uncategorized' for empty strings
+          category: (data.category && data.category.trim() !== '') ? data.category : 'Uncategorized',
+          // Ensure required fields have defaults
+          author: data.author || 'Unknown Author',
+          excerpt: data.excerpt || '',
+          readTime: data.readTime || 1,
+          imageUrl: data.imageUrl || '',
+          tags: Array.isArray(data.tags) ? data.tags : [],
+          views: data.views || 0,
+          title: data.title || 'Untitled',
+          content: data.content || '',
+          slug: data.slug || doc.id,
+          published: data.published || false,
+          featured: data.featured || false
+        };
+      }) as Article[];
+      
+      // Sort articles by creation date (most recent first)
+      articlesData.sort((a, b) => {
+        const dateA = a.createdAt instanceof Date ? a.createdAt : new Date(a.createdAt);
+        const dateB = b.createdAt instanceof Date ? b.createdAt : new Date(b.createdAt);
+        return dateB.getTime() - dateA.getTime();
+      });
+      
+      console.log('Processed articles:', articlesData); // Debug log
+      setArticles(articlesData);
+      
+      // Extract unique categories (filter out empty ones and 'Uncategorized')
+      const uniqueCategories = [...new Set(
+        articlesData
+          .map(article => article.category)
+          .filter(cat => cat && cat.trim() !== '' && cat !== 'Uncategorized')
+      )];
+      
+      // Add 'Uncategorized' if there are any uncategorized articles
+      const hasUncategorized = articlesData.some(article => article.category === 'Uncategorized');
+      if (hasUncategorized) {
+        uniqueCategories.push('Uncategorized');
+      }
+      
+      console.log('Categories found:', uniqueCategories); // Debug log
+      setCategories(uniqueCategories);
+      
+    } catch (error) {
+      console.error('Error fetching articles:', error);
+      
+      // Fallback: try to get all documents from articles collection
+      try {
+        console.log('Trying fallback fetch...');
+        const fallbackQuery = collection(db, 'articles');
+        const fallbackSnapshot = await getDocs(fallbackQuery);
+        
+        console.log('Fallback snapshot size:', fallbackSnapshot.size);
+        
+        const fallbackData = fallbackSnapshot.docs.map(doc => {
+          const data = doc.data();
+          console.log('Fallback document:', doc.id, data);
+          return {
+            id: doc.id,
+            ...data,
+            createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
+            updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate() : new Date(),
+            category: (data.category && data.category.trim() !== '') ? data.category : 'Uncategorized',
+            author: data.author || 'Unknown Author',
+            excerpt: data.excerpt || '',
+            readTime: data.readTime || 1,
+            imageUrl: data.imageUrl || '',
+            tags: Array.isArray(data.tags) ? data.tags : [],
+            views: data.views || 0,
+            title: data.title || 'Untitled',
+            content: data.content || '',
+            slug: data.slug || doc.id,
+            published: data.published !== false, // Default to true if not specified
+            featured: data.featured || false
+          };
+        }).filter(article => article.published); // Filter published articles
+        
+        setArticles(fallbackData);
+        
+        const fallbackCategories = [...new Set(
+          fallbackData
+            .map(article => article.category)
+            .filter(cat => cat && cat.trim() !== '')
+        )];
+        setCategories(fallbackCategories);
+        
+      } catch (fallbackError) {
+        console.error('Fallback fetch also failed:', fallbackError);
+      }
+    } finally {
+      setLoading(false);
     }
-  }, [article]);
+  };
 
-  const handleLike = useCallback(() => {
-    setLiked(prev => !prev);
-    toast.success(liked ? 'Removed from favorites' : 'Added to favorites');
-  }, [liked]);
+  const filterArticles = () => {
+    let filtered = articles;
 
-  // Optimized loading state with skeleton
+    // Filter by search term
+    if (searchTerm.trim()) {
+      const searchLower = searchTerm.toLowerCase();
+      filtered = filtered.filter(article =>
+        (article.title && article.title.toLowerCase().includes(searchLower)) ||
+        (article.excerpt && article.excerpt.toLowerCase().includes(searchLower)) ||
+        (article.category && article.category.toLowerCase().includes(searchLower)) ||
+        (article.author && article.author.toLowerCase().includes(searchLower)) ||
+        (article.content && article.content.toLowerCase().includes(searchLower))
+      );
+    }
+
+    // Filter by category
+    if (selectedCategory !== 'all') {
+      filtered = filtered.filter(article => article.category === selectedCategory);
+    }
+
+    console.log('Filtered articles:', filtered); // Debug log
+    setFilteredArticles(filtered);
+  };
+
+  const ArticleCard = ({ article }: { article: Article }) => (
+    <motion.article
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      whileHover={{ y: -5 }}
+      className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden hover:shadow-lg transition-all duration-300"
+    >
+      <Link to={`/articles/${article.slug || article.id}`} className="block">
+        {/* Article Image */}
+        {article.imageUrl ? (
+          <div className="aspect-video overflow-hidden">
+            <img
+              src={article.imageUrl}
+              alt={article.title}
+              className="w-full h-full object-cover transition-transform duration-300 hover:scale-105"
+              loading="lazy"
+            />
+          </div>
+        ) : (
+          <div className="aspect-video bg-gradient-to-br from-gold-100 to-gold-200 flex items-center justify-center">
+            <Eye size={32} className="text-gold-600" />
+          </div>
+        )}
+
+        {/* Article Content */}
+        <div className="p-6">
+          {/* Category Badge */}
+          <div className="mb-3">
+            <span className="inline-block bg-gold-100 text-gold-800 px-3 py-1 rounded-full text-xs font-medium">
+              {article.category}
+            </span>
+          </div>
+
+          {/* Title */}
+          <h2 className="text-xl font-serif font-bold text-gray-900 mb-3 line-clamp-2 hover:text-gold-700 transition-colors">
+            {article.title}
+          </h2>
+
+          {/* Excerpt */}
+          {article.excerpt && (
+            <p className="text-gray-600 text-sm mb-4 line-clamp-3">
+              {article.excerpt}
+            </p>
+          )}
+
+          {/* Meta Information */}
+          <div className="flex items-center justify-between text-xs text-gray-500">
+            <div className="flex items-center space-x-4">
+              <div className="flex items-center space-x-1">
+                <User size={12} />
+                <span>{article.author}</span>
+              </div>
+              <div className="flex items-center space-x-1">
+                <Calendar size={12} />
+                <span>
+                  {article.createdAt instanceof Date 
+                    ? article.createdAt.toLocaleDateString()
+                    : new Date(article.createdAt).toLocaleDateString()
+                  }
+                </span>
+              </div>
+              <div className="flex items-center space-x-1">
+                <Clock size={12} />
+                <span>{article.readTime} min</span>
+              </div>
+            </div>
+            
+            {/* Read More Arrow */}
+            <ChevronRight size={16} className="text-gold-600" />
+          </div>
+        </div>
+      </Link>
+    </motion.article>
+  );
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 pt-20">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-          {/* Skeleton Loading */}
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+          {/* Loading Skeleton */}
           <div className="animate-pulse">
-            <div className="h-4 bg-gray-300 rounded w-32 mb-8"></div>
-            <div className="h-8 bg-gray-300 rounded w-3/4 mb-4"></div>
-            <div className="h-12 bg-gray-300 rounded w-full mb-6"></div>
-            <div className="flex space-x-4 mb-8">
-              <div className="h-4 bg-gray-300 rounded w-24"></div>
-              <div className="h-4 bg-gray-300 rounded w-24"></div>
-              <div className="h-4 bg-gray-300 rounded w-24"></div>
+            <div className="h-8 bg-gray-300 rounded w-64 mb-4"></div>
+            <div className="h-4 bg-gray-300 rounded w-96 mb-8"></div>
+            
+            {/* Filters Skeleton */}
+            <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 mb-8">
+              <div className="flex flex-col sm:flex-row gap-4">
+                <div className="h-10 bg-gray-300 rounded-full flex-1"></div>
+                <div className="h-10 bg-gray-300 rounded-full w-40"></div>
+              </div>
             </div>
-            <div className="h-64 bg-gray-300 rounded-xl mb-8"></div>
-            <div className="space-y-4">
-              <div className="h-4 bg-gray-300 rounded w-full"></div>
-              <div className="h-4 bg-gray-300 rounded w-5/6"></div>
-              <div className="h-4 bg-gray-300 rounded w-4/5"></div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
-  if (!article) {
-    return (
-      <div className="min-h-screen bg-gray-50 pt-20">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 mb-4">Article Not Found</h1>
-            <p className="text-gray-600 mb-8">The article you're looking for doesn't exist.</p>
-            <Link
-              to="/articles"
-              className="inline-flex items-center space-x-2 bg-gold-500 hover:bg-gold-600 text-white px-6 py-3 rounded-full font-semibold transition-all duration-300"
-            >
-              <ArrowLeft size={20} />
-              <span>Back to Articles</span>
-            </Link>
+            {/* Articles Grid Skeleton */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+              {[...Array(6)].map((_, index) => (
+                <div key={index} className="bg-white rounded-xl overflow-hidden shadow-sm border border-gray-100">
+                  <div className="aspect-video bg-gray-300"></div>
+                  <div className="p-6">
+                    <div className="h-4 bg-gray-300 rounded w-20 mb-3"></div>
+                    <div className="h-6 bg-gray-300 rounded w-full mb-2"></div>
+                    <div className="h-6 bg-gray-300 rounded w-3/4 mb-4"></div>
+                    <div className="h-4 bg-gray-300 rounded w-full mb-2"></div>
+                    <div className="h-4 bg-gray-300 rounded w-2/3 mb-4"></div>
+                    <div className="flex justify-between">
+                      <div className="h-3 bg-gray-300 rounded w-32"></div>
+                      <div className="h-4 bg-gray-300 rounded w-4"></div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </div>
@@ -127,182 +307,131 @@ const ArticleDetail: React.FC = () => {
   return (
     <>
       <Helmet>
-        <title>{article.title} - The Broken Column</title>
-        <meta name="description" content={article.excerpt} />
-        <meta property="og:title" content={article.title} />
-        <meta property="og:description" content={article.excerpt} />
-        <meta property="og:image" content={article.imageUrl} />
-        <meta property="og:type" content="article" />
+        <title>Articles - The Broken Column</title>
+        <meta name="description" content="Explore our collection of insightful articles on politics, society, and current affairs." />
       </Helmet>
 
       <div className="min-h-screen bg-gray-50 pt-20">
-        <article className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-          {/* Back Button */}
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+          {/* Header */}
           <motion.div
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            className="mb-8"
-          >
-            <Link
-              to="/articles"
-              className="inline-flex items-center space-x-2 text-gray-600 hover:text-gray-900 transition-colors"
-            >
-              <ArrowLeft size={20} />
-              <span>Back to Articles</span>
-            </Link>
-          </motion.div>
-
-          {/* Article Header */}
-          <motion.header
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
+            className="text-center mb-12"
+          >
+            <h1 className="text-4xl lg:text-5xl font-serif font-bold text-gray-900 mb-4">
+              Articles
+            </h1>
+            <p className="text-xl text-gray-600 max-w-3xl mx-auto">
+              Discover insightful perspectives on politics, society, and the issues that shape our world
+            </p>
+          </motion.div>
+
+
+
+          {/* Filters */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+            className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 mb-8"
+          >
+            <div className="flex flex-col sm:flex-row gap-4">
+              {/* Search */}
+              <div className="flex-1 relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
+                <input
+                  type="text"
+                  placeholder="Search articles..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-full focus:outline-none focus:ring-2 focus:ring-gold-400 focus:border-transparent"
+                />
+              </div>
+              
+              {/* Category Filter */}
+              <div className="flex items-center space-x-2">
+                <Filter size={20} className="text-gray-400" />
+                <select
+                  value={selectedCategory}
+                  onChange={(e) => setSelectedCategory(e.target.value)}
+                  className="border border-gray-300 rounded-full px-4 py-3 focus:outline-none focus:ring-2 focus:ring-gold-400 focus:border-transparent min-w-[150px]"
+                >
+                  <option value="all">All Categories</option>
+                  {categories.map(category => (
+                    <option key={category} value={category}>
+                      {category}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </motion.div>
+
+          {/* Results Count */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
             className="mb-8"
           >
-            {/* Category Badge */}
-            <div className="mb-4">
-              <span className="inline-block bg-gold-100 text-gold-800 px-3 py-1 rounded-full text-sm font-medium">
-                {article.category}
-              </span>
-            </div>
+            <p className="text-gray-600">
+              {filteredArticles.length === 0 
+                ? 'No articles found'
+                : `${filteredArticles.length} article${filteredArticles.length === 1 ? '' : 's'} found`
+              }
+            </p>
+          </motion.div>
 
-            {/* Title */}
-            <h1 className="text-4xl lg:text-5xl font-serif font-bold text-gray-900 mb-6 leading-tight">
-              {article.title}
-            </h1>
-
-            {/* Meta Information */}
-            <div className="flex flex-wrap items-center gap-6 text-gray-600 mb-6">
-              <div className="flex items-center space-x-2">
-                <User size={18} />
-                <span>{article.author}</span>
-              </div>
-              <div className="flex items-center space-x-2">
-                <Calendar size={18} />
-                <span>{article.createdAt?.toLocaleDateString('en-US', { 
-                  year: 'numeric', 
-                  month: 'long', 
-                  day: 'numeric' 
-                })}</span>
-              </div>
-              <div className="flex items-center space-x-2">
-                <Clock size={18} />
-                <span>{article.readTime} min read</span>
-              </div>
-              {article.views && (
-                <div className="flex items-center space-x-2">
-                  <Eye size={18} />
-                  <span>{article.views} views</span>
-                </div>
-              )}
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex items-center space-x-4 mb-8">
-              <button
-                onClick={handleLike}
-                className={`flex items-center space-x-2 px-4 py-2 rounded-full border transition-all duration-200 ${
-                  liked
-                    ? 'bg-red-50 border-red-200 text-red-600'
-                    : 'bg-white border-gray-300 text-gray-600 hover:border-gray-400'
-                }`}
-              >
-                <Heart size={18} className={liked ? 'fill-current' : ''} />
-                <span>{liked ? 'Liked' : 'Like'}</span>
-              </button>
-              
-              <button
-                onClick={handleShare}
-                className="flex items-center space-x-2 px-4 py-2 rounded-full border border-gray-300 text-gray-600 hover:border-gray-400 bg-white transition-all duration-200"
-              >
-                <Share2 size={18} />
-                <span>Share</span>
-              </button>
-            </div>
-          </motion.header>
-
-          {/* Featured Image with Progressive Loading */}
-          {article.imageUrl && (
+          {/* Articles Grid */}
+          {filteredArticles.length === 0 ? (
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.2 }}
-              className="mb-8"
+              transition={{ delay: 0.3 }}
+              className="text-center py-12"
             >
-              <div className="relative">
-                {!imageLoaded && (
-                  <div className="absolute inset-0 bg-gray-200 animate-pulse rounded-xl"></div>
-                )}
-                <img
-                  src={article.imageUrl}
-                  alt={article.title}
-                  className={`w-full h-64 md:h-96 object-cover rounded-xl shadow-lg transition-opacity duration-300 ${
-                    imageLoaded ? 'opacity-100' : 'opacity-0'
-                  }`}
-                  onLoad={() => setImageLoaded(true)}
-                  onError={() => setImageLoaded(true)}
-                  loading="lazy"
-                />
+              <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Eye className="text-gray-400" size={24} />
               </div>
+              <h3 className="text-lg font-medium text-gray-900 mb-2">No articles found</h3>
+              <p className="text-gray-500 mb-6">
+                {searchTerm || selectedCategory !== 'all' 
+                  ? 'Try adjusting your search or filter criteria'
+                  : 'No articles have been published yet. Check back soon!'
+                }
+              </p>
+              {/* Show raw data for debugging */}
+              <details className="text-left bg-gray-100 p-4 rounded">
+                <summary className="cursor-pointer">Debug: Show raw articles data</summary>
+                <pre className="mt-2 text-xs overflow-auto">
+                  {JSON.stringify(articles, null, 2)}
+                </pre>
+              </details>
+            </motion.div>
+          ) : (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.3 }}
+              className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8"
+            >
+              {filteredArticles.map((article, index) => (
+                <motion.div
+                  key={article.id}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.1 * index }}
+                >
+                  <ArticleCard article={article} />
+                </motion.div>
+              ))}
             </motion.div>
           )}
-
-          {/* Article Content */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.3 }}
-            className="bg-white rounded-xl p-8 shadow-sm border border-gray-100"
-          >
-            <div className="prose prose-lg max-w-none">
-              {article.content.split('\n').map((paragraph, index) => 
-                paragraph.trim() ? (
-                  <p key={index} className="mb-4 text-gray-700 leading-relaxed">
-                    {paragraph}
-                  </p>
-                ) : null
-              )}
-            </div>
-
-            {/* Tags */}
-            {article.tags && article.tags.length > 0 && (
-              <div className="mt-8 pt-8 border-t border-gray-200">
-                <div className="flex items-center space-x-2 mb-4">
-                  <Tag size={18} className="text-gray-500" />
-                  <span className="text-sm font-medium text-gray-700">Tags:</span>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {article.tags.map((tag, index) => (
-                    <span
-                      key={index}
-                      className="inline-block bg-gray-100 text-gray-700 px-3 py-1 rounded-full text-sm"
-                    >
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-          </motion.div>
-
-          {/* Back to Articles */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.4 }}
-            className="mt-12 text-center"
-          >
-            <Link
-              to="/articles"
-              className="inline-flex items-center space-x-2 bg-gold-500 hover:bg-gold-600 text-white px-8 py-4 rounded-full font-semibold transition-all duration-300 transform hover:scale-105"
-            >
-              <ArrowLeft size={20} />
-              <span>More Articles</span>
-            </Link>
-          </motion.div>
-        </article>
+        </div>
       </div>
     </>
   );
 };
 
-export default ArticleDetail;
+export default Articles;
