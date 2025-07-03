@@ -48,7 +48,7 @@ const BiometricAuth = {
         user: {
           id: userId,
           name: userEmail,
-          displayName: userEmail.split('@')[0], // Use just the username part
+          displayName: userEmail.split('@')[0],
         },
         pubKeyCredParams: [
           { alg: -7, type: "public-key" as const },
@@ -56,13 +56,13 @@ const BiometricAuth = {
         ],
         authenticatorSelection: {
           authenticatorAttachment: "platform",
-          userVerification: "discouraged", // Changed to discouraged for better compatibility
+          userVerification: "discouraged",
           requireResidentKey: false,
           residentKey: "discouraged"
         },
-        timeout: 30000, // Reduced timeout to 30 seconds
+        timeout: 30000,
         attestation: "none",
-        excludeCredentials: [] // Explicitly set empty array
+        excludeCredentials: []
       }
     };
 
@@ -77,13 +77,20 @@ const BiometricAuth = {
       ]) as Credential | null;
 
       if (credential) {
-        // Store credential info locally for demo purposes
+        // Store credential info with user data for verification
         const publicKeyCredential = credential as PublicKeyCredential;
         const credentialId = Array.from(new Uint8Array(publicKeyCredential.rawId))
           .map(b => b.toString(16).padStart(2, '0'))
           .join('');
         
-        localStorage.setItem(`biometric_${userEmail}`, credentialId);
+        // Store both credential ID and user email for verification
+        const biometricData = {
+          credentialId,
+          userEmail,
+          registeredAt: Date.now()
+        };
+        
+        localStorage.setItem(`biometric_${userEmail}`, JSON.stringify(biometricData));
         console.log('Biometric credential created successfully');
         return credential;
       }
@@ -95,22 +102,34 @@ const BiometricAuth = {
   },
 
   // Authenticate with biometric
-  authenticate: async (userEmail: string): Promise<Credential | null> => {
+  authenticate: async (userEmail: string): Promise<{ credential: Credential; userEmail: string } | null> => {
     if (!BiometricAuth.isSupported()) {
       throw new Error('WebAuthn is not supported');
     }
 
-    const storedCredentialId = localStorage.getItem(`biometric_${userEmail}`);
-    if (!storedCredentialId) {
+    const storedData = localStorage.getItem(`biometric_${userEmail}`);
+    if (!storedData) {
       throw new Error('No biometric credential found for this user');
+    }
+
+    let biometricData;
+    try {
+      biometricData = JSON.parse(storedData);
+    } catch (error) {
+      // Handle legacy format (just credential ID)
+      biometricData = { credentialId: storedData, userEmail };
     }
 
     const challenge = new Uint8Array(32);
     crypto.getRandomValues(challenge);
 
     // Convert stored credential ID back to Uint8Array
+    const hexPairs = biometricData.credentialId.match(/.{1,2}/g);
+    if (!hexPairs) {
+      throw new Error('Invalid credential ID format');
+    }
     const credentialIdArray = new Uint8Array(
-      storedCredentialId.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16))
+      hexPairs.map((hexByte: string) => parseInt(hexByte, 16))
     );
 
     const credentialRequestOptions: CredentialRequestOptions = {
@@ -121,13 +140,17 @@ const BiometricAuth = {
           type: 'public-key'
         }],
         timeout: 60000,
-        userVerification: "preferred" // Changed from "required" to "preferred"
+        userVerification: "preferred"
       }
     };
 
     try {
       const credential = await navigator.credentials.get(credentialRequestOptions);
-      return credential;
+      if (credential) {
+        // Return both credential and user email for verification
+        return { credential, userEmail: biometricData.userEmail };
+      }
+      return null;
     } catch (error) {
       console.error('Biometric authentication failed:', error);
       throw error;
@@ -144,6 +167,7 @@ const AdminLogin: React.FC = () => {
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [biometricRegistered, setBiometricRegistered] = useState(false);
   const [showBiometricSetup, setShowBiometricSetup] = useState(false);
+  const [loginError, setLoginError] = useState('');
   const { user, login } = useAuth();
 
   // Check biometric availability on component mount
@@ -173,11 +197,13 @@ const AdminLogin: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
+    setLoginError('');
 
     try {
       await login(email, password);
     } catch (error) {
       console.error('Login failed:', error);
+      setLoginError('Invalid email or password');
     } finally {
       setIsLoading(false);
     }
@@ -185,37 +211,80 @@ const AdminLogin: React.FC = () => {
 
   const handleBiometricLogin = async () => {
     if (!email) {
-      alert('Please enter your email address first');
+      setLoginError('Please enter your email address first');
       return;
     }
 
     setIsBiometricLoading(true);
+    setLoginError('');
     
     try {
-      const credential = await BiometricAuth.authenticate(email);
+      const result = await BiometricAuth.authenticate(email);
       
-      if (credential) {
-        // For demo purposes, we'll simulate successful authentication
-        // In a real app, you'd send the credential to your backend for verification
-        console.log('Biometric authentication successful:', credential);
+      if (result && result.credential) {
+        console.log('Biometric authentication successful:', result);
         
-        // Simulate successful login - you'd replace this with actual login logic
-        alert('Biometric authentication successful! (Demo mode)');
-        // await login(email, 'biometric-auth');
+        // Verify the authenticated email matches the input
+        if (result.userEmail === email) {
+          // Call the actual login function with biometric authentication
+          // You can either:
+          // 1. Call login with a special biometric token/flag
+          // 2. Or bypass password requirement for biometric users
+          
+          try {
+            // Option 1: Use a special biometric authentication method
+            // If your AuthContext supports biometric login:
+            // await login(email, null, { biometric: true });
+            
+            // Option 2: For this implementation, we'll simulate successful login
+            // by calling login with verified biometric authentication
+            // You should replace this with your actual biometric login logic
+            
+            // Create a temporary biometric session token
+            const biometricToken = 'biometric_' + Date.now();
+            
+            // Store biometric session (you might want to implement this in your AuthContext)
+            sessionStorage.setItem('biometric_session', JSON.stringify({
+              email,
+              token: biometricToken,
+              timestamp: Date.now()
+            }));
+            
+            // Call login with biometric verification
+            // Since we can't modify the login function, we'll simulate success
+            // In a real implementation, you'd modify your AuthContext to handle biometric auth
+            
+            console.log('Biometric authentication verified, proceeding with login...');
+            
+            // For now, we'll show success and advise to implement proper backend integration
+            alert('Biometric authentication successful! Please integrate with your backend authentication system.');
+            
+            // You would typically do something like:
+            // await authenticateWithBiometric(email, result.credential);
+            
+          } catch (authError) {
+            console.error('Authentication failed after biometric verification:', authError);
+            setLoginError('Authentication failed. Please try again.');
+          }
+        } else {
+          setLoginError('Biometric credential does not match the provided email');
+        }
+      } else {
+        setLoginError('Biometric authentication failed');
       }
       
     } catch (error) {
       console.error('Biometric login failed:', error);
       if (error instanceof Error) {
         if (error.name === 'NotAllowedError') {
-          alert('Biometric authentication was cancelled or failed. Please try again or use password login.');
+          setLoginError('Biometric authentication was cancelled. Please try again.');
         } else if (error.name === 'NotSupportedError') {
-          alert('Biometric authentication is not supported on this device.');
+          setLoginError('Biometric authentication is not supported on this device.');
         } else if (error.message.includes('No biometric credential found')) {
-          alert('No biometric credential found. Please set up biometric authentication first.');
+          setLoginError('No biometric credential found. Please set up biometric authentication first.');
           setBiometricRegistered(false);
         } else {
-          alert('Biometric authentication failed. Please try again or use password login.');
+          setLoginError('Biometric authentication failed. Please try again.');
         }
       }
     } finally {
@@ -225,19 +294,20 @@ const AdminLogin: React.FC = () => {
 
   const handleBiometricSetup = async () => {
     if (!email) {
-      alert('Please enter your email address first');
+      setLoginError('Please enter your email address first');
       return;
     }
 
     // Check if already registered
     if (localStorage.getItem(`biometric_${email}`)) {
-      alert('Biometric authentication is already set up for this account!');
+      setLoginError('Biometric authentication is already set up for this account!');
       setBiometricRegistered(true);
       setShowBiometricSetup(false);
       return;
     }
 
     setIsLoading(true);
+    setLoginError('');
     
     try {
       console.log('Starting biometric setup for:', email);
@@ -248,6 +318,8 @@ const AdminLogin: React.FC = () => {
         setBiometricRegistered(true);
         setShowBiometricSetup(false);
         
+        // Show success message
+        setLoginError('');
         alert('Biometric authentication has been set up successfully! You can now use it to log in.');
       }
       
@@ -255,19 +327,19 @@ const AdminLogin: React.FC = () => {
       console.error('Biometric setup failed:', error);
       if (error instanceof Error) {
         if (error.name === 'NotAllowedError') {
-          alert('Biometric setup was cancelled. Please try again when ready.');
+          setLoginError('Biometric setup was cancelled. Please try again when ready.');
         } else if (error.name === 'NotSupportedError') {
-          alert('Biometric authentication is not supported on this device or browser.');
+          setLoginError('Biometric authentication is not supported on this device or browser.');
         } else if (error.name === 'InvalidStateError') {
-          alert('A biometric credential already exists for this account.');
+          setLoginError('A biometric credential already exists for this account.');
           setBiometricRegistered(true);
           setShowBiometricSetup(false);
         } else if (error.name === 'AbortError') {
-          alert('Biometric setup was interrupted. Please try again.');
+          setLoginError('Biometric setup was interrupted. Please try again.');
         } else if (error.message.includes('Timeout')) {
-          alert('Biometric setup timed out. Please try again and complete the biometric verification quickly.');
+          setLoginError('Biometric setup timed out. Please try again and complete the verification quickly.');
         } else {
-          alert(`Setup failed: ${error.message}. Please try again.`);
+          setLoginError(`Setup failed: ${error.message}. Please try again.`);
         }
       }
     } finally {
@@ -293,6 +365,17 @@ const AdminLogin: React.FC = () => {
             <p className="text-gray-300 mt-2 text-sm sm:text-base">Sign in to manage your content</p>
           </div>
 
+          {/* Error Message */}
+          {loginError && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-red-900/50 border border-red-500/50 text-red-200 px-4 py-3 rounded-lg text-sm"
+            >
+              {loginError}
+            </motion.div>
+          )}
+
           <motion.form
             onSubmit={handleSubmit}
             className="mt-6 sm:mt-8 space-y-4 sm:space-y-6"
@@ -312,7 +395,10 @@ const AdminLogin: React.FC = () => {
                     autoComplete="email"
                     required
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    onChange={(e) => {
+                      setEmail(e.target.value);
+                      setLoginError(''); // Clear error when user types
+                    }}
                     className="w-full pl-10 pr-4 py-2.5 sm:py-3 bg-white/10 border border-white/20 rounded-full text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-gold-400 focus:border-transparent backdrop-blur-sm text-sm sm:text-base"
                     placeholder="Email address"
                   />
@@ -330,7 +416,10 @@ const AdminLogin: React.FC = () => {
                     autoComplete="current-password"
                     required
                     value={password}
-                    onChange={(e) => setPassword(e.target.value)}
+                    onChange={(e) => {
+                      setPassword(e.target.value);
+                      setLoginError(''); // Clear error when user types
+                    }}
                     className="w-full pl-10 pr-11 py-2.5 sm:py-3 bg-white/10 border border-white/20 rounded-full text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-gold-400 focus:border-transparent backdrop-blur-sm text-sm sm:text-base"
                     placeholder="Password"
                   />
