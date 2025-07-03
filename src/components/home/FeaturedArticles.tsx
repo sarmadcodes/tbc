@@ -22,27 +22,109 @@ const FeaturedArticles: React.FC = () => {
 
   const fetchFeaturedArticles = async () => {
     try {
-      const articlesQuery = query(
-        collection(db, 'articles'),
-        where('published', '==', true),
-        where('featured', '==', true),
-        orderBy('createdAt', 'desc'),
-        limit(3)
-      );
+      setLoading(true);
+      
+      // First, try to get featured articles with ordering
+      let articlesQuery;
+      
+      try {
+        // Try with ordering first
+        articlesQuery = query(
+          collection(db, 'articles'),
+          where('published', '==', true),
+          where('featured', '==', true),
+          orderBy('createdAt', 'desc'),
+          limit(3)
+        );
+      } catch (error) {
+        console.log('Ordering failed for featured articles, fetching without order:', error);
+        // If ordering fails, just get featured articles without ordering
+        articlesQuery = query(
+          collection(db, 'articles'),
+          where('published', '==', true),
+          where('featured', '==', true),
+          limit(3)
+        );
+      }
       
       const snapshot = await getDocs(articlesQuery);
-      const articles = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        createdAt: doc.data().createdAt?.toDate(),
-        updatedAt: doc.data().updatedAt?.toDate(),
-      })) as Article[];
+      console.log('Featured articles snapshot size:', snapshot.size); // Debug log
       
-      setFeaturedArticles(articles);
+      const articlesData = snapshot.docs.map(doc => {
+        const data = doc.data();
+        console.log('Featured article data:', doc.id, data); // Debug log
+        
+        return {
+          id: doc.id,
+          ...data,
+          // Handle Firestore Timestamp conversion
+          createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(data.createdAt || Date.now()),
+          updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate() : new Date(data.updatedAt || Date.now()),
+          // Handle empty or missing category
+          category: (data.category && data.category.trim() !== '') ? data.category : 'Uncategorized',
+          // Ensure required fields have defaults
+          author: data.author || 'Unknown Author',
+          excerpt: data.excerpt || '',
+          readTime: data.readTime || 1,
+          imageUrl: data.imageUrl || '',
+          tags: Array.isArray(data.tags) ? data.tags : [],
+          views: data.views || 0,
+          title: data.title || 'Untitled',
+          content: data.content || '',
+          slug: data.slug || doc.id,
+          published: data.published || false,
+          featured: data.featured || false
+        };
+      }) as Article[];
+      
+      // Sort articles by creation date (most recent first) if not already sorted
+      articlesData.sort((a, b) => {
+        const dateA = a.createdAt instanceof Date ? a.createdAt : new Date(a.createdAt);
+        const dateB = b.createdAt instanceof Date ? b.createdAt : new Date(b.createdAt);
+        return dateB.getTime() - dateA.getTime();
+      });
+      
+      console.log('Processed featured articles:', articlesData);
+      setFeaturedArticles(articlesData);
+      
     } catch (error) {
       console.error('Error fetching featured articles:', error);
-      // Fallback to mock data if Firebase fails
-      setFeaturedArticles([]);
+      
+      // Fallback: try to get all articles and filter for featured ones
+      try {
+        console.log('Trying fallback fetch for featured articles...');
+        const fallbackQuery = collection(db, 'articles');
+        const fallbackSnapshot = await getDocs(fallbackQuery);
+        
+        const fallbackData = fallbackSnapshot.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            ...data,
+            createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
+            updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate() : new Date(),
+            category: (data.category && data.category.trim() !== '') ? data.category : 'Uncategorized',
+            author: data.author || 'Unknown Author',
+            excerpt: data.excerpt || '',
+            readTime: data.readTime || 1,
+            imageUrl: data.imageUrl || '',
+            tags: Array.isArray(data.tags) ? data.tags : [],
+            views: data.views || 0,
+            title: data.title || 'Untitled',
+            content: data.content || '',
+            slug: data.slug || doc.id,
+            published: data.published !== false,
+            featured: data.featured || false
+          };
+        }).filter(article => article.published && article.featured) // Filter for published and featured
+          .slice(0, 3); // Limit to 3 articles
+        
+        console.log('Fallback featured articles:', fallbackData);
+        setFeaturedArticles(fallbackData);
+        
+      } catch (fallbackError) {
+        console.error('Fallback fetch also failed:', fallbackError);
+      }
     } finally {
       setLoading(false);
     }
@@ -108,7 +190,7 @@ const FeaturedArticles: React.FC = () => {
                       whileHover={{ y: -5 }}
                       transition={{ duration: 0.3 }}
                     >
-                      <Link to={`/articles/${article.id}`} className="block">
+                      <Link to={`/articles/${article.slug || article.id}`} className="block">
                         <div className="relative overflow-hidden rounded-xl mb-4">
                           {article.imageUrl ? (
                             <img
@@ -162,6 +244,14 @@ const FeaturedArticles: React.FC = () => {
                   </div>
                   <h3 className="text-lg font-medium text-gray-900 mb-2">No Featured Articles Yet</h3>
                   <p className="text-gray-500">Featured articles will appear here once they're published.</p>
+                  
+                  {/* Debug info */}
+                  <details className="mt-4 text-left bg-gray-100 p-4 rounded">
+                    <summary className="cursor-pointer text-sm">Debug: Show featured articles data</summary>
+                    <pre className="mt-2 text-xs overflow-auto">
+                      {JSON.stringify(featuredArticles, null, 2)}
+                    </pre>
+                  </details>
                 </motion.div>
               )}
             </>
