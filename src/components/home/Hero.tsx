@@ -10,7 +10,7 @@ const Hero: React.FC = () => {
     threshold: 0.1,
   });
 
-  const heroImage = "https://images.pexels.com/photos/1323550/pexels-photo-1323550.jpeg?auto=compress&cs=tinysrgb&w=1920&h=1080&fit=crop";
+  const heroImage = "https://visitlocaltravel.com/blog/wp-content/uploads/2024/07/Beautiful-Sunset-in-Siem-Reap.png";
 
   return (
     <section className="relative h-screen flex items-start justify-center pt-32 overflow-hidden">
@@ -66,10 +66,14 @@ const Hero: React.FC = () => {
           >
             <Link
               to="/articles"
-              className="group inline-flex items-center space-x-2 bg-gold-500 hover:bg-gold-600 text-white px-8 py-4 rounded-full font-semibold transition-all duration-300 transform hover:scale-105"
+              className="group relative inline-flex items-center space-x-2 bg-gold-500 text-white px-8 py-4 rounded-full font-semibold transition-all duration-300 transform hover:scale-105 overflow-hidden"
             >
-              <span>Explore Articles</span>
-              <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />
+              {/* Loading overlay that slides from left to right */}
+              <div className="absolute inset-0 bg-gold-600 transform -translate-x-full group-hover:translate-x-0 transition-transform duration-500 ease-out" />
+              
+              {/* Button content */}
+              <span className="relative z-10">Explore Articles</span>
+              <ArrowRight size={20} className="relative z-10 group-hover:translate-x-1 transition-transform" />
             </Link>
 
             <button className="group inline-flex items-center space-x-2 bg-white/10 hover:bg-white/20 text-white px-8 py-4 rounded-full font-semibold backdrop-blur-sm transition-all duration-300">
